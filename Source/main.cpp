@@ -8,6 +8,7 @@
 GLubyte timer_cnt = 0;
 bool timer_enabled = true;
 unsigned int timer_speed = 16;
+int scene_mode = 0;
 struct Shape {
 	GLuint vao;
 	GLuint vbo_position;
@@ -28,9 +29,12 @@ using namespace std;
 mat4 mv;
 mat4 p;
 
-Shape* shapes;
-Material* materials;
-const aiScene* scene;
+const int scene_num = 2;
+const aiScene* scene[scene_num];
+
+Shape* shapes[scene_num];
+Material* materials[scene_num];
+
 
 GLuint program;
 GLuint um4mv;
@@ -128,6 +132,113 @@ TextureData loadPNG(const char* const pngFilepath)
 
     return texture;
 }
+void LoadScene(char* file_path, const aiScene* &scene, int scene_index) {
+	scene = aiImportFile(file_path, aiProcessPreset_TargetRealtime_MaxQuality);
+	shapes[scene_index] = new Shape[scene->mNumMeshes]();
+	materials[scene_index] = new Material[scene->mNumMaterials]();
+	cout << "shape number: " << scene->mNumMeshes << endl;
+	cout << "material number: " << scene->mNumMaterials << endl;
+
+
+
+	for (unsigned int i = 0; i < scene->mNumMaterials; ++i) {
+		aiMaterial *aimaterial = scene->mMaterials[i];
+		Material material;
+		aiString texturePath;
+		if (aimaterial->GetTexture(aiTextureType_DIFFUSE, 0, &texturePath) == aiReturn_SUCCESS) {
+			string directory[scene_num] = {
+				"crytek-sponza/",
+				"dabrovic-sponza/"
+			};
+			directory[scene_index].append(texturePath.data);
+			cout << directory[scene_index] << endl;
+			TextureData data = loadPNG(directory[scene_index].c_str());
+			glGenTextures(1, &material.diffuse_tex);
+			glBindTexture(GL_TEXTURE_2D, material.diffuse_tex);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, data.width, data.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data.data);
+			glGenerateMipmap(GL_TEXTURE_2D);
+		}
+		else {
+			material.diffuse_tex = NULL;
+		}
+		materials[scene_index][i] = material;
+	}
+
+
+
+	for (unsigned int i = 0; i < scene->mNumMeshes; ++i) {
+		aiMesh* mesh = scene->mMeshes[i];
+		Shape shape;
+		glGenVertexArrays(1, &shape.vao);
+		glBindVertexArray(shape.vao);
+
+		glGenBuffers(1, &shape.vbo_position);
+		glGenBuffers(1, &shape.vbo_normal);
+		glGenBuffers(1, &shape.vbo_texcoord);
+
+		unsigned int* faces = new unsigned int[mesh->mNumFaces * 3]();
+		float* positions = new float[mesh->mNumVertices * 3]();
+		float* normals = new float[mesh->mNumVertices * 3]();
+		float* tex_coords = new float[mesh->mNumVertices * 2]();
+
+		for (unsigned int v = 0; v < mesh->mNumVertices; ++v) {
+
+			for (unsigned int j = 0; j < 3; ++j) {
+				positions[v * 3 + j] = mesh->mVertices[v][j];
+			}
+			//cout << mesh->mVertices[v][0] << endl;
+			for (unsigned int j = 0; j < 3; ++j) {
+				normals[v * 3 + j] = mesh->mNormals[v][j];
+			}
+			for (unsigned int j = 0; j < 2; ++j) {
+				if (mesh->mTextureCoords[0])
+					tex_coords[v * 2 + j] = mesh->mTextureCoords[0][v][j];
+				else
+					tex_coords[v * 2 + j] = 0.0;
+			}
+		}
+		glBindBuffer(GL_ARRAY_BUFFER, shape.vbo_position);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(GL_FLOAT) * 3 * mesh->mNumVertices,
+			(const void *)positions, GL_STATIC_DRAW);
+		glVertexAttribPointer(0, 3,
+			GL_FLOAT, GL_FALSE, sizeof(float) * 3, 0);
+
+		glBindBuffer(GL_ARRAY_BUFFER, shape.vbo_normal);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(GL_FLOAT) * 3 * mesh->mNumVertices,
+			(const void *)normals, GL_STATIC_DRAW);
+		glVertexAttribPointer(2, 3,
+			GL_FLOAT, GL_FALSE, sizeof(float) * 3, 0);
+
+		glBindBuffer(GL_ARRAY_BUFFER, shape.vbo_texcoord);
+		glBufferData(GL_ARRAY_BUFFER, sizeof(GL_FLOAT) * 2 * mesh->mNumVertices,
+			(const void *)tex_coords, GL_STATIC_DRAW);
+		glVertexAttribPointer(1, 2,
+			GL_FLOAT, GL_FALSE, sizeof(float) * 2, 0);
+
+		glGenBuffers(1, &shape.ibo);
+
+		for (unsigned int f = 0; f < mesh->mNumFaces; ++f) {
+
+			for (int j = 0; j < 3; ++j) {
+				faces[f * 3 + j] = mesh->mFaces[f].mIndices[j];
+			}
+		}
+
+		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, shape.ibo);
+		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(unsigned int) * 3 * mesh->mNumFaces,
+			(const void *)faces, GL_STATIC_DRAW);
+
+
+		glEnableVertexAttribArray(0);
+		glEnableVertexAttribArray(1);
+		glEnableVertexAttribArray(2);
+
+		shape.materialID = mesh->mMaterialIndex;
+		shape.drawCount = mesh->mNumFaces * 3;
+
+		shapes[scene_index][i] = shape;
+	}
+}
 
 void My_Init()
 {
@@ -170,140 +281,14 @@ void My_Init()
 
 	// Tell OpenGL to use this shader program now
 	glUseProgram(program);
-
-
-
-	scene = aiImportFile("crytek-sponza/sponza.obj", aiProcessPreset_TargetRealtime_MaxQuality);
-	shapes = new Shape[scene->mNumMeshes]();
-	materials = new Material[scene->mNumMaterials]();
-	cout << "shape number: " << scene->mNumMeshes << endl;
-	cout << "material number: " << scene->mNumMaterials << endl;
-	
-
-
-	for (unsigned int i = 0; i < scene->mNumMaterials; ++i) {
-		aiMaterial *aimaterial = scene->mMaterials[i];
-		Material material;
-		aiString texturePath;
-		if (aimaterial->GetTexture(aiTextureType_DIFFUSE, 0, &texturePath) == aiReturn_SUCCESS) {
-			
-			string directory = "crytek-sponza/";
-			directory.append(texturePath.data);
-			cout << directory << endl;
-			TextureData data = loadPNG(directory.c_str());
-			glGenTextures(1, &material.diffuse_tex);
-			glBindTexture(GL_TEXTURE_2D, material.diffuse_tex);
-			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, data.width, data.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data.data);
-			glGenerateMipmap(GL_TEXTURE_2D);
-		}
-		else {
-			material.diffuse_tex = NULL;
-		}
-		materials[i] = material;
+	char* scene_path[] = {
+		"crytek-sponza/sponza.obj",
+		"dabrovic-sponza/sponza.obj"
+	};
+	for (int i = 0; i < scene_num; ++i) {
+		LoadScene(scene_path[i], scene[i], i);
 	}
 	
-
-
-	for (unsigned int i = 0; i < scene->mNumMeshes; ++i) {
-		aiMesh* mesh = scene->mMeshes[i];
-		Shape shape;
-		glGenVertexArrays(1, &shape.vao);
-		glBindVertexArray(shape.vao);
-
-		glGenBuffers(1, &shape.vbo_position);
-		glGenBuffers(1, &shape.vbo_normal);
-		glGenBuffers(1, &shape.vbo_texcoord);
-		//test
-		/*glBindBuffer(GL_ARRAY_BUFFER, shape.vbo_position);
-		glBufferData(GL_ARRAY_BUFFER, sizeof(GL_FLOAT) * 3 * mesh->mNumVertices,
-			(const void *)&mesh->mVertices[0], GL_STATIC_DRAW);
-
-		glBindBuffer(GL_ARRAY_BUFFER, shape.vbo_normal);
-		glBufferData(GL_ARRAY_BUFFER, sizeof(GL_FLOAT) * 3 * mesh->mNumVertices,
-			(const void *)&mesh->mNormals[0], GL_STATIC_DRAW);
-
-		glBindBuffer(GL_ARRAY_BUFFER, shape.vbo_texcoord);
-		glBufferData(GL_ARRAY_BUFFER, sizeof(GL_FLOAT) * 2 * mesh->mNumVertices,
-			(const void *)&mesh->mTextureCoords[0][0], GL_STATIC_DRAW);*/
-		unsigned int* faces = new unsigned int[mesh->mNumFaces * 3]();
-		float* positions = new float[mesh->mNumVertices * 3]();
-		float* normals = new float[mesh->mNumVertices * 3]();
-		float* tex_coords = new float[mesh->mNumVertices * 2]();
-
-		for (unsigned int v = 0; v < mesh->mNumVertices; ++v) {
-			
-			/*glBindBuffer(GL_ARRAY_BUFFER, shape.vbo_position);
-			glBufferData(GL_ARRAY_BUFFER, sizeof(GL_FLOAT) * 3, 
-				(const void *) &mesh->mVertices[v], GL_STATIC_DRAW);
-			
-			glBindBuffer(GL_ARRAY_BUFFER, shape.vbo_normal);
-			glBufferData(GL_ARRAY_BUFFER, sizeof(GL_FLOAT) * 3, 
-				(const void *)&mesh->mNormals[v], GL_STATIC_DRAW);
-			
-			glBindBuffer(GL_ARRAY_BUFFER, shape.vbo_texcoord);
-			if (mesh->mTextureCoords[0]) {
-				glBufferData(GL_ARRAY_BUFFER, sizeof(GL_FLOAT) * 2,
-					(const void *)&mesh->mTextureCoords[0][v], GL_STATIC_DRAW);
-			}*/
-			for (unsigned int j = 0; j < 3; ++j) {
-				positions[v * 3 + j] = mesh->mVertices[v][j];
-			}
-			//cout << mesh->mVertices[v][0] << endl;
-			for (unsigned int j = 0; j < 3; ++j) {
-				normals[v * 3 + j] = mesh->mNormals[v][j];
-			}
-			for (unsigned int j = 0; j < 2; ++j) {
-				if (mesh->mTextureCoords[0])
-					tex_coords[v * 2 + j] = mesh->mTextureCoords[0][v][j];
-				else
-					tex_coords[v * 2 + j] = 0.0;
-			}
-		}
-		glBindBuffer(GL_ARRAY_BUFFER, shape.vbo_position);
-		glBufferData(GL_ARRAY_BUFFER, sizeof(GL_FLOAT) * 3 * mesh->mNumVertices,
-			(const void *)positions, GL_STATIC_DRAW);
-		glVertexAttribPointer(0, 3,
-			GL_FLOAT, GL_FALSE, sizeof(float) * 3, 0);
-
-		glBindBuffer(GL_ARRAY_BUFFER, shape.vbo_normal);
-		glBufferData(GL_ARRAY_BUFFER, sizeof(GL_FLOAT) * 3 * mesh->mNumVertices,
-			(const void *)normals, GL_STATIC_DRAW);
-		glVertexAttribPointer(2, 3,
-			GL_FLOAT, GL_FALSE, sizeof(float) * 3, 0);
-
-		glBindBuffer(GL_ARRAY_BUFFER, shape.vbo_texcoord);
-		glBufferData(GL_ARRAY_BUFFER, sizeof(GL_FLOAT) * 2 * mesh->mNumVertices,
-			(const void *)tex_coords, GL_STATIC_DRAW);
-		glVertexAttribPointer(1, 2,
-			GL_FLOAT, GL_FALSE, sizeof(float) * 2, 0);
-
-		glGenBuffers(1, &shape.ibo);
-
-		for (unsigned int f = 0; f < mesh->mNumFaces; ++f) {
-			
-			/*glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, shape.ibo);
-			glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(GL_FLOAT) * 3, 
-				(const void *)&mesh->mFaces[f], GL_STATIC_DRAW);*/
-			for (int j = 0; j < 3; ++j) {
-				faces[f * 3 + j] = mesh->mFaces[f].mIndices[j];
-			}
-		}
-
-		//test
-		glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, shape.ibo);
-		glBufferData(GL_ELEMENT_ARRAY_BUFFER, sizeof(unsigned int) * 3 * mesh->mNumFaces, 
-			(const void *)faces, GL_STATIC_DRAW);
-
-
-		glEnableVertexAttribArray(0);
-		glEnableVertexAttribArray(1);
-		glEnableVertexAttribArray(2);
-
-		shape.materialID = mesh->mMaterialIndex;
-		shape.drawCount = mesh->mNumFaces * 3;
-
-		shapes[i] = shape;
-	}
 	//aiReleaseImport(scene);
 	cout << "init ok" << endl;
 }
@@ -320,11 +305,11 @@ void My_Display()
 	glUniform1i(tex, 0);
 	//glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
-	for (int i = 0; i < scene->mNumMeshes; ++i) {
-		glBindVertexArray(shapes[i].vao);
-		int materialID = shapes[i].materialID;
-		glBindTexture(GL_TEXTURE_2D, materials[materialID].diffuse_tex);
-		glDrawElements(GL_TRIANGLES, shapes[i].drawCount, GL_UNSIGNED_INT, 0);
+	for (int i = 0; i < scene[scene_mode]->mNumMeshes; ++i) {
+		glBindVertexArray(shapes[scene_mode][i].vao);
+		int materialID = shapes[scene_mode][i].materialID;
+		glBindTexture(GL_TEXTURE_2D, materials[scene_mode][materialID].diffuse_tex);
+		glDrawElements(GL_TRIANGLES, shapes[scene_mode][i].drawCount, GL_UNSIGNED_INT, 0);
 	}
 
     glutSwapBuffers();
@@ -397,6 +382,38 @@ void My_Mouse(int button, int state, int x, int y)
 void My_Keyboard(unsigned char key, int x, int y)
 {
 	printf("Key %c is pressed at (%d, %d)\n", key, x, y);
+	switch (key) {
+	case 'w':
+	case 'W':
+		camera_position += camera_front * mouse_speed;
+		break;
+	case 'a':
+	case 'A':
+		camera_position -= camera_right * mouse_speed;
+		break;
+	case 's':
+	case 'S':
+		camera_position -= camera_front * mouse_speed;
+		break;
+	case 'd':
+	case 'D':
+		camera_position += camera_right * mouse_speed;
+		break;
+	case 'z':
+	case 'Z':
+		camera_position.y += mouse_speed;
+		break;
+	case 'x':
+	case 'X':
+		camera_position.y -= mouse_speed;
+		break;
+	default:
+
+		break;
+
+	}
+	CameraUpdate();
+	mv = lookAt(camera_position, camera_position + camera_front, camera_up);
 }
 
 void My_SpecialKeys(int key, int x, int y)
@@ -411,19 +428,19 @@ void My_SpecialKeys(int key, int x, int y)
 		break;
 	case GLUT_KEY_LEFT:
 		printf("Left arrow is pressed at (%d, %d)\n", x, y);
-		camera_position -= camera_right * mouse_speed;
 		break;
 	case GLUT_KEY_RIGHT:
 		printf("Right arrow is pressed at (%d, %d)\n", x, y);
-		camera_position += camera_right * mouse_speed;
 		break;
 	case GLUT_KEY_UP:
 		printf("Up arrow is pressed at (%d, %d)\n", x, y);
-		camera_position += camera_front * mouse_speed;
+		scene_mode = ((scene_mode + 1 + scene_num) % scene_num);
+		printf("Change scene to scene %d", scene_mode);
 		break;
 	case GLUT_KEY_DOWN:
 		printf("Down arrow is pressed at (%d, %d)\n", x, y);
-		camera_position -= camera_front * mouse_speed;
+		scene_mode = ((scene_mode - 1 + scene_num) % scene_num);
+		printf("Change scene to scene %d", scene_mode);
 		break;
 	default:
 		printf("Other special key is pressed at (%d, %d)\n", x, y);
