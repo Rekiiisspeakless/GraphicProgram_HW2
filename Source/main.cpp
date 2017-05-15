@@ -132,6 +132,31 @@ TextureData loadPNG(const char* const pngFilepath)
 
     return texture;
 }
+
+void LoadSkyBox(char* faces[]) {
+	GLuint skybox_tex;
+	glGenTextures(1, &skybox_tex);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(GL_TEXTURE_BINDING_CUBE_MAP, skybox_tex);
+
+	int width, height;
+	TextureData texture;
+
+	for (int i = 0; i < 6; ++i) {
+		texture = loadPNG(faces[i]);
+		glTexImage2D(
+			GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0,
+			GL_RGB, texture.width, texture.height, 
+			0, GL_RGB, GL_UNSIGNED_BYTE, texture.data
+		);
+	}
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+	glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+	glBindTexture(GL_TEXTURE_CUBE_MAP, 0);
+}
 void LoadScene(char* file_path, const aiScene* &scene, int scene_index) {
 	scene = aiImportFile(file_path, aiProcessPreset_TargetRealtime_MaxQuality);
 	shapes[scene_index] = new Shape[scene->mNumMeshes]();
@@ -139,7 +164,11 @@ void LoadScene(char* file_path, const aiScene* &scene, int scene_index) {
 	cout << "shape number: " << scene->mNumMeshes << endl;
 	cout << "material number: " << scene->mNumMaterials << endl;
 
-
+	char* defaultPath[scene_num] = {
+		"crytek-sponza/textures/sponza_curtain_diff.png",
+		"dabrovic-sponza/01_S_kap.JPG"
+	};
+	TextureData defaultTexture = loadPNG(defaultPath[scene_index]);
 
 	for (unsigned int i = 0; i < scene->mNumMaterials; ++i) {
 		aiMaterial *aimaterial = scene->mMaterials[i];
@@ -159,7 +188,11 @@ void LoadScene(char* file_path, const aiScene* &scene, int scene_index) {
 			glGenerateMipmap(GL_TEXTURE_2D);
 		}
 		else {
-			material.diffuse_tex = NULL;
+			glGenTextures(1, &material.diffuse_tex);
+			glBindTexture(GL_TEXTURE_2D, material.diffuse_tex);
+			glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, defaultTexture.width, defaultTexture.height, 0, GL_RGBA, GL_UNSIGNED_BYTE, defaultTexture.data);
+			glGenerateMipmap(GL_TEXTURE_2D);
+			
 		}
 		materials[scene_index][i] = material;
 	}
@@ -311,7 +344,7 @@ void My_Display()
 		glBindTexture(GL_TEXTURE_2D, materials[scene_mode][materialID].diffuse_tex);
 		glDrawElements(GL_TRIANGLES, shapes[scene_mode][i].drawCount, GL_UNSIGNED_INT, 0);
 	}
-
+	
     glutSwapBuffers();
 }
 
@@ -322,6 +355,39 @@ void CameraUpdate() {
 	camera_front = normalize(camera_front);
 	camera_right = normalize(cross(camera_front, world_up));
 	camera_up = normalize(cross(camera_right, camera_front));
+}
+
+void InitialCamera(int index) {
+	if (index == 0) {
+		camera_yaw = -90.0f;
+		camera_pitch = 0.0f;
+		mouse_speed = 2.0f;
+		mouse_sensitivty = 0.25f;
+		camera_zoom = 45.0f;
+
+		camera_up = vec3(0.0f, 1.0f, 0.0f);
+		camera_position = vec3(0.0f, 3.0f, 3.0f);
+		camera_front = vec3(0.0f, 0.0f, -1.0f);
+		camera_right;
+		world_up = vec3(0.0f, 1.0f, 0.0f);
+		CameraUpdate();
+		mv = lookAt(camera_position, camera_position + camera_front, camera_up);
+	}
+	else {
+		camera_yaw = -90.0f;
+		camera_pitch = 0.0f;
+		mouse_speed = 0.125f;
+		mouse_sensitivty = 0.25f;
+		camera_zoom = 45.0f;
+
+		camera_up = vec3(0.0f, 1.0f, 0.0f);
+		camera_position = vec3(0.0f, 3.0f, 3.0f);
+		camera_front = vec3(0.0f, 0.0f, -1.0f);
+		camera_right;
+		world_up = vec3(0.0f, 1.0f, 0.0f);
+		CameraUpdate();
+		mv = lookAt(camera_position, camera_position + camera_front, camera_up);
+	}
 }
 
 void My_Reshape(int width, int height)
@@ -353,12 +419,12 @@ void My_Mouse_Motion(int x, int y)
 	GLfloat camera_y = y_offset * mouse_sensitivty;
 	camera_yaw += x_offset;
 	camera_pitch += y_offset;
-	if (camera_pitch > 89.0f) {
+	/*if (camera_pitch > 89.0f) {
 		camera_pitch = 89.0f;
 	}
 	if (camera_yaw < -89.0f) {
 		camera_yaw = -89.0f;
-	}
+	}*/
 	CameraUpdate();
 	mv = lookAt(camera_position, camera_position + camera_front, camera_up);
 }
@@ -435,11 +501,13 @@ void My_SpecialKeys(int key, int x, int y)
 	case GLUT_KEY_UP:
 		printf("Up arrow is pressed at (%d, %d)\n", x, y);
 		scene_mode = ((scene_mode + 1 + scene_num) % scene_num);
+		InitialCamera(scene_mode);
 		printf("Change scene to scene %d", scene_mode);
 		break;
 	case GLUT_KEY_DOWN:
 		printf("Down arrow is pressed at (%d, %d)\n", x, y);
 		scene_mode = ((scene_mode - 1 + scene_num) % scene_num);
+		InitialCamera(scene_mode);
 		printf("Change scene to scene %d", scene_mode);
 		break;
 	default:

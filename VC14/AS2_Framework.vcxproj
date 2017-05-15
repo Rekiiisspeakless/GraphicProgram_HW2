@@ -84,6 +84,8 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="..\Assets\fragment.fs.glsl" />
+    <None Include="..\Assets\skybox_fragment.vs.glsl" />
+    <None Include="..\Assets\skybox_vertex.vs.glsl" />
     <None Include="..\Assets\vertex.vs.glsl" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

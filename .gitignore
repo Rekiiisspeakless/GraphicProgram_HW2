@@ -9,6 +9,7 @@
 *.wmv
 *.mp4
 *.pptx
+*docx
 
 # Packages #
 ############
